@@ -71,75 +71,100 @@ def generate_2d():
         )
 
         zi = interp(xi, yi)
+        # 强制清理 NaN（防止 contourf 崩溃）
+        if np.any(np.isnan(zi)):
+            fill_val = np.nanmean(zi) if not np.all(np.isnan(zi)) else 0
+            zi = np.nan_to_num(zi, nan=fill_val)
 
-        # ── 绘图 ───────────────────────────────────────────────
+        # ── 绘图部分 ───────────────────────────────────────────────
         plt.style.use('dark_background')
-        fig, ax = plt.subplots(figsize=(9, 7), facecolor='#1e1e26')
+        fig, ax = plt.subplots(figsize=(10, 8), facecolor='#1e1e26')  # 稍大一点方便看标签
         ax.set_facecolor('#1e1e26')
 
-        # 等高面填充
-        levels = 50
-        cntr = ax.contourf(
+        # 1. 填充颜色（底图）
+        # 安全获取范围
+        vmin, vmax = np.nanmin(zi), np.nanmax(zi)
+        if np.isnan(vmin) or np.isnan(vmax):
+            return "Interpolation resulted in no valid data", 400
+        levels_fill = np.linspace(zi.min(), zi.max(), 60)  # 更多level让颜色过渡更细腻
+        cntr_fill = ax.contourf(
             xi, yi, zi,
-            levels=50,
+            levels=levels_fill,
             cmap="Spectral_r",
-            antialiased=True,  # 抗锯齿
+            antialiased=True,
             extend='both',
-            # 下面两行让颜色过渡更柔和
-            alpha=0.95,
-            zorder=1
+            alpha=0.92
         )
 
-        # 井位置散点（黄色）
-        # 可选：再叠加一层平滑的等高线（contour），让轮廓更清晰自然
-        ax.contour(
+        # 2. 绘制等高线（用于标注数字）
+        #   levels 可以比填充少一些，避免太密；也可以手动指定想标注的关键值
+        manual_levels = np.arange(
+            np.round(zi.min() / 5) * 5,
+            np.round(zi.max() / 5 + 1) * 5,
+            5
+        )  # 每5个单位一个主要等高线，例如 0,5,10,...,45
+
+        cntr_lines = ax.contour(
             xi, yi, zi,
-            levels=15,  # 少一点，避免太乱
+            levels=manual_levels,  # 只在这些值上画线并标注
             colors='white',
-            linewidths=0.6,
-            alpha=0.5,
+            linewidths=1.0,
             linestyles='solid',
+            alpha=0.9,
             zorder=5
         )
 
-        # 在每个井上标注井名
+        # 3. 在等高线上添加数字标签（最关键一步）
+        labels = ax.clabel(
+            cntr_lines,
+            levels=manual_levels,  # 只标注这些级别
+            inline=True,  # 标签嵌入线内
+            inline_spacing=5,  # 标签与线的间距
+            fontsize=9,
+            colors='white',
+            fmt='%.0f',  # 整数显示（可改成 %.1f 显示一位小数）
+            rightside_up=True,
+            use_clabeltext=True  # 更好的旋转与对齐
+        )
+
+        # 让标签有轻微背景（可选，防重叠或底色干扰）
+        for label in labels:
+            label.set_bbox(dict(
+                facecolor='black',
+                alpha=0.4,
+                edgecolor='none',
+                pad=1.2
+            ))
+
+        # 4. 井点 + 井名标注（保持不变或微调）
+        ax.scatter(x, y, color='yellow', s=50, edgecolor='black', linewidth=1.0, zorder=10)
+
         for i, name in enumerate(names):
             ax.text(
-                x[i], y[i],
+                x[i], y[i] + 0.00005,  # 轻微上移避免盖住点
                 name,
                 fontsize=8.5,
                 color='white',
-                ha='left',
+                ha='center',  # 改成居中更美观
                 va='bottom',
                 zorder=15,
-                bbox=dict(
-                    facecolor='black',
-                    alpha=0.5,
-                    edgecolor='none',
-                    pad=1.8,
-                    boxstyle='round,pad=0.15'
-                ),
-                transform=ax.transData
+                bbox=dict(facecolor='black', alpha=0.55, edgecolor='none', pad=1.6, boxstyle='round,pad=0.2')
             )
 
-        # 添加颜色条（colorbar）
-        cbar = fig.colorbar(cntr, ax=ax, pad=0.03, fraction=0.046, shrink=0.85)
-        cbar.set_label('Tubing Head Pressure (unit)', fontsize=10, color='white')
-        cbar.ax.tick_params(labelsize=9, colors='white')
-        cbar.ax.yaxis.set_tick_params(color='white')
-        # 让colorbar的刻度标签和spine颜色为白色（dark模式友好）
+        # 5. 颜色条
+        cbar = fig.colorbar(cntr_fill, ax=ax, pad=0.04, fraction=0.046, shrink=0.82)
+        cbar.set_label('Tubing Head Pressure', fontsize=11, color='white')
+        cbar.ax.tick_params(labelsize=9.5, colors='white')
         for spine in cbar.ax.spines.values():
             spine.set_color('white')
 
-        # 坐标轴标签与标题
+        # 轴与标题
         ax.set_xlabel('Longitude', fontsize=11, color='white')
         ax.set_ylabel('Latitude', fontsize=11, color='white')
-        ax.set_title('Tubing Head Pressure Contour - CA* Wells (2025-11-01)',
-                     fontsize=13, color='white', pad=12)
+        ax.set_title('Tubing Head Pressure Contour - CA* Wells (2025-11-01)', fontsize=14, color='white', pad=15)
 
-        ax.tick_params(axis='both', colors='white', labelsize=9)
+        ax.tick_params(axis='both', colors='white', labelsize=9.5)
 
-        # 紧凑布局
         plt.tight_layout()
 
         # 保存到内存
