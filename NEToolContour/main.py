@@ -8,6 +8,7 @@ import matplotlib
 from flask import Flask, send_file, jsonify, Response
 from flask_cors import CORS
 from scipy.interpolate import griddata  # 确保这行存在
+from scipy.interpolate import CloughTocher2DInterpolator
 
 # 1. 基础配置
 matplotlib.use('Agg')
@@ -62,7 +63,14 @@ def generate_2d():
         xi, yi = np.meshgrid(xi, yi)
 
         # 插值（linear / cubic 都可试，视数据分布选择）
-        zi = griddata((x, y), z, (xi, yi), method='linear')
+        interp = CloughTocher2DInterpolator(
+            (x, y),
+            z,
+            fill_value=np.nan,  # 或用 z.mean() / 0 等
+            rescale=True  # 重要：当经纬度尺度差异大时开启
+        )
+
+        zi = interp(xi, yi)
 
         # ── 绘图 ───────────────────────────────────────────────
         plt.style.use('dark_background')
@@ -71,10 +79,28 @@ def generate_2d():
 
         # 等高面填充
         levels = 50
-        cntr = ax.contourf(xi, yi, zi, levels=levels, cmap="Spectral_r", extend='both')
+        cntr = ax.contourf(
+            xi, yi, zi,
+            levels=50,
+            cmap="Spectral_r",
+            antialiased=True,  # 抗锯齿
+            extend='both',
+            # 下面两行让颜色过渡更柔和
+            alpha=0.95,
+            zorder=1
+        )
 
         # 井位置散点（黄色）
-        ax.scatter(x, y, color='yellow', s=40, edgecolor='black', linewidth=0.8, zorder=10)
+        # 可选：再叠加一层平滑的等高线（contour），让轮廓更清晰自然
+        ax.contour(
+            xi, yi, zi,
+            levels=15,  # 少一点，避免太乱
+            colors='white',
+            linewidths=0.6,
+            alpha=0.5,
+            linestyles='solid',
+            zorder=5
+        )
 
         # 在每个井上标注井名
         for i, name in enumerate(names):
