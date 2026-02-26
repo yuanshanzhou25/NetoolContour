@@ -44,6 +44,118 @@ def get_well_data():
     df = df.groupby(['longitude', 'latitude', 'well_name']).mean().reset_index()
     return df
 
+import plotly.graph_objects as go
+@app.route('/api/well-2d-interactive')
+def generate_2d_interactive():
+    try:
+        df = get_well_data()
+        if df.empty:
+            return jsonify({"error": "No data found"}), 404
+
+        df = df.dropna(subset=['longitude', 'latitude', 'tubing_head_pressure'])
+
+        lon = df['longitude'].astype(float).values
+        lat = df['latitude'].astype(float).values
+        pressure = df['tubing_head_pressure'].astype(float).values
+        names  = df['well_name'].tolist()
+
+        # ── 网格化 ────────────────────────────────────────
+        grid_size = 120   # 可调，越大越细腻但计算慢
+        xi = np.linspace(lon.min(), lon.max(), grid_size)
+        yi = np.linspace(lat.min(), lat.max(), grid_size)
+        xm, ym = np.meshgrid(xi, yi)
+
+        # 插值（cubic 更平滑，但边缘易 NaN → 用 linear 补）
+        zi_cubic  = griddata((lon, lat), pressure, (xm, ym), method='cubic')
+        zi_linear = griddata((lon, lat), pressure, (xm, ym), method='linear')
+        zi = np.where(np.isnan(zi_cubic), zi_linear, zi_cubic)
+        zi = np.nan_to_num(zi, nan=float(pressure.min()))   # 兜底
+
+        # ── 构建 Plotly data ───────────────────────────────
+        contour_data = {
+            "type": "contour",
+            "x": xi.tolist(),
+            "y": yi.tolist(),
+            "z": zi.tolist(),
+            "colorscale": "Spectral",          # 与 3D 保持一致
+            "reversescale": True,
+            "contours": {
+                "coloring": "fill",             # 填充模式
+                "showlabels": True,
+                "labelfont": {"color": "white", "size": 10},
+                "operation": "=",
+                "value": "every 5",             # 每 5 个单位标注一次（可调）
+                "showlines": True,
+                "line": {"color": "white", "width": 1}
+            },
+            "line": {"color": "white", "width": 0.8},
+            "autocontour": False,               # 关闭自动等高，配合下面手动 levels
+            "contours": {                       # 更精细控制
+                "start": round(pressure.min() / 5) * 5,
+                "end":   round(pressure.max() / 5 + 1) * 5,
+                "size":  5
+            },
+            "showscale": True,
+            "colorbar": {
+                "title": {"text": "Tubing Head Pressure", "font": {"color": "white"}},
+                "tickfont": {"color": "white"}
+            }
+        }
+
+        # 井点 + 文字标注
+        scatter_data = {
+            "type": "scatter",
+            "x": lon.tolist(),
+            "y": lat.tolist(),
+            "mode": "markers+text",
+            "text": names,
+            "textposition": "top center",
+            "marker": {
+                "size": 8,
+                "color": "yellow",
+                "line": {"color": "black", "width": 1}
+            },
+            "textfont": {
+                "color": "white",
+                "size": 10
+            }
+        }
+
+        result = {
+            "data": [contour_data, scatter_data],
+            "layout": {
+                "template": "plotly_dark",
+                "paper_bgcolor": "#1e1e26",
+                "plot_bgcolor":  "#1e1e26",
+                "font": {"color": "white"},
+                "title": {
+                    "text": "Tubing Head Pressure Contour - CA* Wells (2025-11-01)",
+                    "font": {"size": 16}
+                },
+                "xaxis": {
+                    "title": "Longitude",
+                    "gridcolor": "#444",
+                    "zeroline": False
+                },
+                "yaxis": {
+                    "title": "Latitude",
+                    "gridcolor": "#444",
+                    "zeroline": False,
+                    "scaleanchor": "x",    # 保持经纬度比例（重要！）
+                    "scaleratio": 1
+                },
+                "margin": {"l": 50, "r": 50, "t": 60, "b": 50},
+                "hovermode": "closest",
+                "showlegend": False
+            }
+        }
+
+        return Response(json.dumps(result), mimetype='application/json')
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/netool-contour-map')
 def generate_2d():
@@ -282,6 +394,21 @@ def generate_3d_interactive():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+
+@app.route('/api/netool-contour-map-data')
+def generate_2d_data():
+    try:
+        df = get_well_data()
+        if df.empty:
+            return jsonify({"error": "No data found"}), 404
+
+        # 返回 JSON: 列表形式，便于前端解析
+        data = df.to_dict(
+            orient='records')  # [{'well_name': 'CA1', 'latitude': 123.45, 'longitude': 67.89, 'tubing_head_pressure': 100}, ...]
+        return jsonify({"data": data})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)

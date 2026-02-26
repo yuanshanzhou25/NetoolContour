@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+    <div id="contour-map" style="width: 800px; height: 600px;"></div>
+    <script>
+        fetch('/api/netool-contour-map-data')
+            .then(response => response.json())
+            .then(result => {
+                const data = result.data;
+                if (!data || data.length === 0) return;
+                
+                // 提取数据
+                const x = data.map(d => d.longitude);
+                const y = data.map(d => d.latitude);
+                const z = data.map(d => d.tubing_head_pressure);
+                
+                // 网格化与插值（简单线性插值；如需 CloughTocher，可用自定义函数或库）
+                const xi = Array.from({length: 200}, (_, i) => x.min() + i * (x.max() - x.min()) / 199);
+                const yi = Array.from({length: 200}, (_, i) => y.min() + i * (y.max() - y.min()) / 199);
+                const zi = [];  // 手动插值网格（或用库如 numeric.js）
+                for (let i = 0; i < yi.length; i++) {
+                    zi[i] = [];
+                    for (let j = 0; j < xi.length; j++) {
+                        // 简单最近邻插值示例；实际用 bilinear 或更高级
+                        const dists = x.map((px, idx) => Math.hypot(px - xi[j], y[idx] - yi[i]));
+                        const minIdx = dists.indexOf(Math.min(...dists));
+                        zi[i][j] = z[minIdx];
+                    }
+                }
+                
+                // Plotly 等值图
+                const plotData = [{
+                    x: xi,
+                    y: yi,
+                    z: zi,
+                    type: 'contour',
+                    colorscale: 'Spectral',
+                    autocontour: false,
+                    contours: {
+                        coloring: 'heatmap',
+                        showlabels: true,
+                        labelfont: { size: 12, color: 'white' }
+                    },
+                    colorbar: { title: 'Tubing Head Pressure' }
+                }];
+                
+                // 添加井点散点
+                plotData.push({
+                    x: x,
+                    y: y,
+                    mode: 'markers+text',
+                    text: data.map(d => d.well_name),
+                    textposition: 'top',
+                    marker: { color: 'yellow', size: 10 }
+                });
+                
+                Plotly.newPlot('contour-map', plotData, {
+                    title: 'Tubing Head Pressure Contour - CA* Wells (2025-11-01)',
+                    xaxis: { title: 'Longitude' },
+                    yaxis: { title: 'Latitude' }
+                });
+            })
+            .catch(error => console.error('Error:', error));
+    </script>
+</body>
+</html>

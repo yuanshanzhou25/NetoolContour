@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="./plotly.min.js"></script>
+</head>
+<body>
+    <div id="contour-map" style="width: 800px; height: 600px;"></div>
+    <script>
+        fetch('http://localhost:5000/api/netool-contour-map-data')
+            .then(response => {
+                if (!response.ok) throw new Error('Network response was not ok');
+                return response.json();
+            })
+            .then(result => {
+                const data = result.data || [];
+                if (data.length === 0) {
+                    console.error("No data returned");
+                    return;
+                }
+
+                const longitudes = data.map(d => Number(d.longitude)).filter(v => !isNaN(v));
+                const latitudes  = data.map(d => Number(d.latitude)).filter(v => !isNaN(v));
+                const pressures  = data.map(d => Number(d.tubing_head_pressure)).filter(v => !isNaN(v));
+                const names      = data.map(d => d.well_name);
+
+                if (longitudes.length < 3) {
+                    console.error("Too few valid points");
+                    return;
+                }
+
+                const xMin = Math.min(...longitudes);
+                const xMax = Math.max(...longitudes);
+                const yMin = Math.min(...latitudes);
+                const yMax = Math.max(...latitudes);
+
+                const xi = Array.from({length: 200}, (_, i) => xMin + i * (xMax - xMin) / 199);
+                const yi = Array.from({length: 200}, (_, i) => yMin + i * (yMax - yMin) / 199);
+
+                // 下面是 zi 的简单最近邻插值（后续可优化）
+                const zi = yi.map(yVal =>
+                    xi.map(xVal => {
+                        let minDist = Infinity;
+                        let closestZ = 0;
+                        for (let j = 0; j < longitudes.length; j++) {
+                            const dist = Math.hypot(longitudes[j] - xVal, latitudes[j] - yVal);
+                            if (dist < minDist) {
+                                minDist = dist;
+                                closestZ = pressures[j];
+                            }
+                        }
+                        return closestZ;
+                    })
+                );
+
+                // Plotly 配置（保持原样，但确保 script 已加载）
+                const plotData = [{
+                    x: xi,
+                    y: yi,
+                    z: zi,
+                    type: 'contour',
+                    colorscale: 'Spectral',
+                    autocontour: false,
+                    contours: { coloring: 'heatmap', showlabels: true, labelfont: { size: 12, color: 'white' } },
+                    colorbar: { title: 'Tubing Head Pressure' }
+                }, {
+                    x: longitudes,
+                    y: latitudes,
+                    mode: 'markers+text',
+                    text: names,
+                    textposition: 'top',
+                    marker: { color: 'yellow', size: 10 }
+                }];
+
+                Plotly.newPlot('contour-map', plotData, {
+                    title: 'Tubing Head Pressure Contour - CA* Wells (2025-11-01)',
+                    xaxis: { title: 'Longitude' },
+                    yaxis: { title: 'Latitude' },
+                    paper_bgcolor: '#1e1e26',
+                    plot_bgcolor: '#1e1e26',
+                    font: { color: 'white' }
+                });
+            })
+            .catch(error => console.error('Error:', error));
+    </script>
+</body>
+</html>
